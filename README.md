@@ -1,65 +1,86 @@
 # sound2video
 
-Pipeline that dubs an English product-demo video into Russian using OCR/ASR timing and Yandex SpeechKit TTS.
+Пайплайн для переозвучки англоязычного продуктового видео на русский язык: распознавание речи и вшитых субтитров, тайминг, синтез и подгонка речи, удаление вшитых субтитров.
 
-Built for a SonoScape E-Series ultrasound scanner training video, but the scripts are generic.
+Делалось под обучающее видео об УЗИ-сканере SonoScape серии E, но скрипты не привязаны к конкретному ролику.
 
-## What it does
+## Что здесь есть
 
-The source video has English narration with Russian captions burned into the picture. Two independent dubbing variants are produced from it:
+В исходном видео — английская озвучка и вшитые (нарисованные поверх картинки) русские субтитры. На его основе собраны три независимых варианта переозвучки и отдельно — версия без вшитых субтитров.
 
-**Variant 1 — timed to the on-screen captions**
-1. `work/transcribe.py` — rough speech-to-text pass with faster-whisper (used only to help verify timing)
-2. `work/ocr.ps1` — Windows OCR over extracted video frames to read the burned-in Russian captions
-3. `work/group_ocr.py` — collapses consecutive frames with the same caption into timed groups
-4. `work/ocr_sheets.py` — contact sheets for manually checking OCR groups
-5. `work/refine_times.py` — refines each caption's start/end by diffing frame pixels against a template
-6. `work/check_fades.py` — sanity-checks fade in/out timing at a couple of boundaries
-7. `work/finalize_subtitles.py` — applies manual OCR-error fixes, writes `outputs/project/subs/subtitles.srt` / `.json`
-8. `work/tts_generate.py` — synthesizes each subtitle line with Yandex SpeechKit (voice `jane`)
-9. `work/tts_fit.py` — time-stretches each line to its subtitle slot (natural pace when it fits, capped speed-up otherwise, silence-padded rather than over-stretched)
-10. `work/assemble_output.py` — builds the full narration track and muxes it over the original video (audio replaced, video re-encoded not required — copied)
+### Вариант 1 — тайминг по вшитым субтитрам
 
-**Variant 2 — timed to the original English speech, translated**
-1. `work/transcribe_en.py` — full English transcript with per-segment timing (faster-whisper)
-2. Translated by hand into `work/translation_ru.json`, same segment ids/timing as the English transcript
-3. `work/tts_generate_v2.py` / `work/tts_fit_v2.py` / `work/assemble_output_v2.py` — same TTS/fit/assemble approach as variant 1, but driven by the translated segments instead of the OCR subtitles
+1. `work/transcribe.py` — черновое распознавание речи через faster-whisper (нужно было только для проверки таймингов)
+2. `work/ocr.ps1` — OCR (Windows OCR) по кадрам видео, чтобы прочитать вшитые русские субтитры
+3. `work/group_ocr.py` — схлопывает подряд идущие кадры с одинаковым текстом в тайм-группы
+4. `work/ocr_sheets.py` — контрольные листы кадров для ручной проверки OCR-групп
+5. `work/refine_times.py` — уточняет начало/конец каждой группы попиксельным сравнением кадров с шаблоном
+6. `work/check_fades.py` — проверка плавных появлений/исчезновений текста на паре границ
+7. `work/finalize_subtitles.py` — ручные правки ошибок OCR, финальные `outputs/project/subs/subtitles.srt` / `.json`
+8. `work/tts_generate.py` — синтез каждой реплики через Yandex SpeechKit (голос `jane`)
+9. `work/tts_fit.py` — подгонка длительности реплики под слот субтитра: естественный темп, если помещается; иначе — ускорение с ограничением (не более 2×) и тишина вместо растяжения через весь слот
+10. `work/assemble_output.py` — сборка полной звуковой дорожки и наложение её на видео (звук заменяется, картинка копируется без перекодирования)
 
-Both fit scripts push a line's start later (instead of overlapping voices) when even the speed-up cap can't make it fit; drift is usually reabsorbed by the next natural pause.
+### Вариант 2 — тайминг по оригинальной английской речи, с переводом
 
-## Setup
+1. `work/transcribe_en.py` — полная расшифровка английской речи с таймингом по репликам (faster-whisper)
+2. Перевод на русский вручную, `work/translation_ru.json`, те же id и тайминги, что и в английской расшифровке
+3. `work/tts_generate_v2.py` / `work/tts_fit_v2.py` / `work/assemble_output_v2.py` — тот же подход TTS/подгонка/сборка, что и в варианте 1, но на основе перевода, а не OCR-субтитров
+
+В обоих вариантах, если реплика не помещается в свой слот даже с ускорением, следующая реплика просто сдвигается позже (без наложения голосов друг на друга) — накопленный сдвиг обычно гасится на ближайшей естественной паузе.
+
+### Вариант 3 — живая озвучка (46 файлов), тайминг по темам
+
+Используется готовая живая озвучка (46 mp3, записана отдельно под этот ролик), а не синтез речи.
+
+1. Файлы переименовываются в `outputs/project/audio_raw_v3/NN.mp3` по номеру
+2. `work/transcribe_va.py` — расшифровка каждого файла (faster-whisper) для сверки с содержанием видео
+3. `work/va_anchors.json` — вручную сопоставленные тайм-коды: с какого момента исходного видео должна начинаться каждая реплика
+4. `work/tts_fit_v3.py` — только конвертация в единый формат, без изменения темпа (живой голос не растягивается и не ускоряется)
+5. `work/assemble_output_v3.py` — сборка с той же логикой сдвига при наложении, что и в вариантах 1–2, но без ограничения на величину сдвига (раз темп не меняется, сдвиг может накапливаться значительно). Живая озвучка покрывает только часть видео — после её окончания в дорожку подставляется оригинальная английская озвучка, синхронно с картинкой, до конца ролика
+
+### Удаление вшитых субтитров
+
+`work/remove_captions.py` — построчный инпейнтинг (OpenCV, алгоритм Telea) поверх области субтитров, только в кадрах, где субтитры реально показаны (по таймингу из `subtitles.json`). Работает через потоковый пайп ffmpeg → Python → ffmpeg, без сохранения кадров на диск. Результат — `..._nocaptions.mp4`, на него накладывается озвучка вариантов 2 и 3.
+
+Пробовался и нейросетевой видео-инпейнтинг (ProPainter) — на статичных кадрах модели часто не на чем восстанавливать фон (сцена не двигается, и фон под текстом никогда не виден ни на одном кадре), результат получался шумным. Классический покадровый метод оказался надёжнее для этого видео, так как фон под субтитрами почти везде однородный.
+
+## Установка
 
 ```
 py -3.12 -m venv work/py-venv
-work/py-venv/Scripts/pip install faster-whisper
+work/py-venv/Scripts/pip install faster-whisper opencv-python numpy
 ```
 
-ffmpeg/ffprobe are expected at `outputs/project/tools/ffmpeg-9.0.1-essentials_build/bin/`.
+ffmpeg/ffprobe ожидаются в `outputs/project/tools/ffmpeg-9.0.1-essentials_build/bin/`.
 
-Copy `.env.example` to `.env` and fill in a Yandex Cloud SpeechKit API key + folder id:
+Скопируйте `.env.example` в `.env` и впишите ключ и folder id Yandex Cloud SpeechKit:
 
 ```
 YANDEX_API_KEY=...
 YANDEX_FOLDER_ID=...
 ```
 
-## Layout
+## Структура
 
 ```
 outputs/project/
-  input/            source video (not tracked)
-  subs/             final subtitles.srt / subtitles.json (variant 1)
-  audio_raw/        raw TTS per line, variant 1 (not tracked)
-  audio_fitted/     time-fitted TTS per line, variant 1 (not tracked)
-  audio_raw_v2/     raw TTS per line, variant 2 (not tracked)
-  audio_fitted_v2/  time-fitted TTS per line, variant 2 (not tracked)
-  output/           final dubbed videos (not tracked)
-  tools/            portable ffmpeg build (not tracked)
+  input/              исходное видео (не в репозитории)
+  subs/               финальные subtitles.srt / subtitles.json (вариант 1)
+  audio_raw/          сырой TTS по репликам, вариант 1 (не в репозитории)
+  audio_fitted/       подогнанный TTS, вариант 1 (не в репозитории)
+  audio_raw_v2/       сырой TTS, вариант 2 (не в репозитории)
+  audio_fitted_v2/    подогнанный TTS, вариант 2 (не в репозитории)
+  audio_raw_v3/       живая озвучка (46 mp3), вариант 3 (не в репозитории)
+  audio_fitted_v3/    сконвертированная озвучка, вариант 3 (не в репозитории)
+  output/             итоговые видео (не в репозитории)
+  tools/              портативный ffmpeg (не в репозитории)
 work/
-  *.py, ocr.ps1     pipeline scripts
-  ocr-*.json(l)     OCR intermediate data
-  transcript*.json  Whisper transcripts (English + progress logs)
-  translation_ru.json  Russian translation used by variant 2
+  *.py, ocr.ps1       скрипты пайплайна
+  ocr-*.json(l)       промежуточные данные OCR
+  transcript*.json    расшифровки Whisper (английский + логи прогресса)
+  translation_ru.json русский перевод для варианта 2
+  va_anchors.json     тайм-коды привязки для варианта 3
 ```
 
-Generated media, the Whisper model cache, and Python environments are gitignored — rerunning the scripts regenerates them locally.
+Сгенерированные медиафайлы, кэш модели Whisper и виртуальные окружения Python не хранятся в репозитории — они пересоздаются локальным запуском скриптов.
